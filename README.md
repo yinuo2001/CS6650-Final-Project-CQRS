@@ -8,5 +8,4 @@ A simplified but production-style backend system demonstrating:
 
 ## Architecture Overview
 
-
-
+![image](Architecture.png)
