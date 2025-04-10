@@ -2,7 +2,7 @@
 
 A simplified but production-style CQRS backend system demonstrating:
 - Read-through caching with **Redis**
-- Asynchronous write handling via **Kafka**
+- User identity validation via **AWS Lambda**
 - Eventual consistency with **cache updates**
 - Separation of read and write paths (lightweight **CQRS**)
 
@@ -10,16 +10,16 @@ A simplified but production-style CQRS backend system demonstrating:
 
 ![image](Architecture.png)
 
-**Reads**: Go to Redis first -> fallback to DB if cache misses
+**Reads**: AWS Lambda validates client identity -> Go to Redis first -> fallback to DB if cache misses
 
-**Writes**: Go to DB -> publish to MQ -> consumer updates Redis
+**Writes**: Server updates database & Redis cache
 
 ## Technologies Used
 
 - **Redis** - in-memory cache
 - **MongoDB** - persistent storage
-- **Kafka** - message queue for decoupling
-- **Java** - backend language
+- **AWS Lambda** - user identity validation
+- **Java Servlet** - multi-threaded backend
 
 ## How It Works
 
@@ -28,17 +28,17 @@ A simplified but production-style CQRS backend system demonstrating:
 1. App receives a POST request
 2. Load balancer forwards it to write server
 3. Write server writes the data to MongoDB
-4. Write server publishes event to Kafka
-5. Kafka forwards message to Redis
+4. Write server writes the message to Redis
 6. Redis updates its cache
 
 ### Read Request
 
 1. App receives a GET request
-2. Load balancer forwards it to read server
-3. Read server fetches data from Redis (if exists)
-4. If cache misses, read server fetches data from MongoDB
-5. Read server writes the result to Redis (read-through caching)
+2. AWS Lambda validates client identity
+3. Load balancer forwards it to read server
+4. Read server fetches data from Redis (if exists)
+5. If cache misses, read server fetches data from MongoDB
+6. Read server writes the result to Redis (read-through caching)
 
 ## Why This Design
 
