@@ -10,7 +10,7 @@
     </parent>
 
     <artifactId>POSTserver</artifactId>
-
+    <packaging>war</packaging>
     <dependencies>
         <dependency>
             <groupId>javax.servlet</groupId>
