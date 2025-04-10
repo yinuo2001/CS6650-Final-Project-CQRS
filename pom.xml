@@ -11,7 +11,8 @@
 
     <modules>
         <module>client</module>
-        <module>server</module>
+        <module>GETserver</module>
+        <module>POSTserver</module>
     </modules>
 
     <properties>
