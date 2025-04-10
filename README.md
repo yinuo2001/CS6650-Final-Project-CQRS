@@ -45,7 +45,6 @@ A simplified but production-style CQRS backend system demonstrating:
 ### Pros
 - Fast reads via Redis
 - Read-write separation
-- Loose coupling via Kafka
 
 ### Trade-offs
 Eventual Consistency:
