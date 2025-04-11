@@ -6,7 +6,7 @@ import javax.servlet.annotation.*;
 import java.io.IOException;
 
 // GetServlet fetches posts from Redis cache/MongoDB
-@WebServlet(name = "GetServlet", value = "/gets/*")
+@WebServlet(name = "GetServlet", value = "/*")
 public class GetServlet extends HttpServlet {
   
   @Override

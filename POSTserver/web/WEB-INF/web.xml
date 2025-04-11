@@ -9,7 +9,7 @@
     </servlet>
     <servlet-mapping>
         <servlet-name>PostServlet</servlet-name>
-        <url-pattern>/posts/*</url-pattern>
+        <url-pattern>/*</url-pattern>
     </servlet-mapping>
 
 </web-app>
