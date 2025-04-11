@@ -21,6 +21,17 @@ A simplified but production-style CQRS backend system demonstrating:
 - **AWS Lambda** - user identity validation
 - **Java Servlet** - multi-threaded backend
 
+## API Endpoint Structure
+
+### Write Endpoints(POST)
+- [IP_ADDR]:8080/post_server/posts - Create a new post
+- [IP_ADDR]:8080/post_server/users - Create a new user
+
+### Read Endpoints(GET)
+- [IP_ADDR]:8080/get_server/posts - Retrieve all posts
+- [IP_ADDR]:8080/get_server/posts/{id} - Retrieve a specific post
+- [IP_ADDR]:8080/get_server/users/{id} - Retrieve a specific user
+
 ## How It Works
 
 ### Write Request

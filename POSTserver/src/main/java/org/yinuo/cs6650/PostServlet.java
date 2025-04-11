@@ -14,24 +14,25 @@ public class PostServlet extends HttpServlet {
       throws ServletException, IOException {
         String url = request.getPathInfo();
         
-        // Check if the request is valid
         if (url == null || url.isEmpty()) {
-          response.setStatus(HttpServletResponse.SC_BAD_REQUEST);
-          response.getWriter().write("Missing parameters");
+          handleInvalidRequest(response);
           return;
         }
 
-        if (url.equals("/posts")) {
-          // Create a new post
-          createPost(request, response);
-        } else if (url.equals("/users")) {
-          // Create a new user
-          createUser(request, response);
-        } else {
-          // Invalid request
-          response.setStatus(HttpServletResponse.SC_BAD_REQUEST);
-          response.getWriter().write("Invalid request");
-          return;
+        // Check where the request is routed to
+        switch (url) {
+          // URL: [IP_ADDR]:[PORT]/[WAR_NAME]/posts
+          case "/posts":
+            createPost(request, response);
+            break;
+          case "/users":
+          // URL: [IP_ADDR]:[PORT]/[WAR_NAME]/users
+            createUser(request, response);
+            break;
+          default:
+            // Invalid request
+            handleInvalidRequest(response);
+            break;
         }
   }
 
@@ -45,5 +46,11 @@ public class PostServlet extends HttpServlet {
   private void createUser(HttpServletRequest request, HttpServletResponse response) throws IOException {
     response.setStatus(HttpServletResponse.SC_OK);
     response.getWriter().write("User created");
+  }
+
+  // Handle invalid request
+  private void handleInvalidRequest(HttpServletResponse response) throws IOException {
+    response.setStatus(HttpServletResponse.SC_BAD_REQUEST);
+    response.getWriter().write("Invalid request");
   }
 }
