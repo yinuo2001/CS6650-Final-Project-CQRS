@@ -32,16 +32,18 @@ A simplified but production-style CQRS backend system demonstrating:
 - [IP_ADDR]:8080/get_server/posts/{id} - Retrieve a specific post
 - [IP_ADDR]:8080/get_server/users/{id} - Retrieve a specific user
 
-## Database Schema
+## Database
 
-### Users Table
+### Database Schema
+
+**Users Table**
 |   Column   |     Type      |         Constraints            |
 |------------|---------------|--------------------------------|
 |   user_id  |     INT       |   PRIMARY KEY, AUTO_INCREMENT  |
 |   username |  VARCHAR(50)  |  UNIQUE, NOT NULL              |
 | created_at |  TIMESTAMP    |   DEFAULT CURRENT_TIMESTAMP    |
 
-### Posts Table
+**Posts Table**
 |   Column   |     Type      |         Constraints                    |
 |------------|---------------|----------------------------------------|
 |   post_id  |     INT       |   PRIMARY KEY, AUTO_INCREMENT          |
@@ -49,6 +51,22 @@ A simplified but production-style CQRS backend system demonstrating:
 |   title    |  VARCHAR(255) |   NOT NULL                             |
 |   content  |  TEXT         |       NOT NULL                         |
 | created_at |   TIMESTAMP   |      DEFAULT CURRENT_TIMESTAMP         |
+
+### Database Connection Design
+
+**Dual Connection Strategy**
+
+The application implements a dual database connection strategy optimized for different types of HTTP operations:
+
+**GET Requests:**
+
+- **Connection Pooling**: For read operations, a connection pool is used to manage multiple concurrent connections efficiently. This allows the application to handle a high volume of read requests without overwhelming the database.
+- **Rationale**: Read operations don't modify data and therefore don't risk race conditions between concurrent requests.
+
+**POST Requests:**
+- **Per-request Connection**: Each POST request creates a fresh database connection that is closed when the request completes.
+- **Implementation**: Connections are established at the beginning of doPost() and closed in a finally block.
+- **Rationale**: Write operations can modify shared data, so isolating connections provides better concurrency control
 
 ## How It Works
 
@@ -58,7 +76,7 @@ A simplified but production-style CQRS backend system demonstrating:
 2. Load balancer forwards it to write server
 3. Write server writes the data to MongoDB
 4. Write server writes the message to Redis
-6. Redis updates its cache
+5. Redis updates its cache
 
 ### Read Request
 
