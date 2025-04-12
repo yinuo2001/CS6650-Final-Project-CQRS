@@ -15,6 +15,10 @@ public class PostServlet extends HttpServlet {
   private static final String EMPTY_URL = "Empty URL";
   private static final String INCOMPLETE_URL = "Incomplete URL";
 
+  // Message constants
+  private static final String CREATE_POST_SUCCESS = "Post created successfully";
+  private static final String CREATE_USER_SUCCESS = "User created successfully";
+
   // Database connection constants
   private static final String DB_DRIVER = "com.mysql.cj.jdbc.Driver";
   //TODO: Change the database name to RDS db name
@@ -103,20 +107,36 @@ public class PostServlet extends HttpServlet {
 
     PreparedStatement statement = connection.prepareStatement(
         "INSERT INTO posts (title, content, user_id) VALUES (?, ?, ?)");
+
+    // Handle SQL exceptions e.g. user_id not found
     try (statement) {
       statement.setString(1, title);
       statement.setString(2, content);
       statement.setString(3, userId);
       statement.executeUpdate();
     }
-    response.setStatus(HttpServletResponse.SC_OK);
-    response.getWriter().write("Post created");
+    response.setStatus(HttpServletResponse.SC_CREATED);
+    response.getWriter().write(CREATE_POST_SUCCESS);
   }
 
   // Create a new user
-  private void createUser(HttpServletRequest request, HttpServletResponse response) throws IOException {
-    response.setStatus(HttpServletResponse.SC_OK);
-    response.getWriter().write("User created");
+  private void createUser(HttpServletRequest request, HttpServletResponse response)
+      throws IOException, SQLException {
+    String username = request.getParameter("username");
+
+    if (username == null || username.isEmpty()) {
+      handleError(response, HttpServletResponse.SC_BAD_REQUEST, MISSING_REQUIRED_PARAMETERS);
+      return;
+    }
+
+    PreparedStatement statement = connection.prepareStatement("INSERT INTO users (username) VALUES (?)");
+    // Close the statement automatically at the end of the block
+    try (statement) {
+      statement.setString(1, username);
+      statement.executeUpdate();
+    }
+    response.setStatus(HttpServletResponse.SC_CREATED);
+    response.getWriter().write(CREATE_USER_SUCCESS);
   }
 
   // Handle different error cases
