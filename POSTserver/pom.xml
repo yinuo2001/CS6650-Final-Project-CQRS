@@ -11,6 +11,10 @@
 
     <artifactId>POSTserver</artifactId>
     <packaging>war</packaging>
+    <build>
+        <finalName>post_server</finalName>
+    </build>
+    
     <dependencies>
         <dependency>
             <groupId>javax.servlet</groupId>

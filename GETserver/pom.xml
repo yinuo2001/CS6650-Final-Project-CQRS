@@ -11,6 +11,10 @@
 
     <artifactId>GETserver</artifactId>
     <packaging>war</packaging>
+    <build>
+        <finalName>get_server</finalName>
+    </build>
+    
     <dependencies>
         <dependency>
             <groupId>javax.servlet</groupId>
