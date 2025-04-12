@@ -16,7 +16,7 @@ A simplified but production-style CQRS backend system demonstrating:
 
 ## Technologies Used
 
-- **Redis** - in-memory cache
+- **Redis** - in-memory, write-through cache (updated immediately when the primary database is updated)
 - **MongoDB** - persistent storage
 - **AWS Lambda** - user identity validation
 - **Java Servlet** - multi-threaded backend
@@ -31,6 +31,24 @@ A simplified but production-style CQRS backend system demonstrating:
 - [IP_ADDR]:8080/get_server/posts - Retrieve all posts
 - [IP_ADDR]:8080/get_server/posts/{id} - Retrieve a specific post
 - [IP_ADDR]:8080/get_server/users/{id} - Retrieve a specific user
+
+## Database Schema
+
+### Users Table
+|   Column   |     Type      |         Constraints            |
+|------------|---------------|--------------------------------|
+|   user_id  |     INT       |   PRIMARY KEY, AUTO_INCREMENT  |
+|   username |  VARCHAR(50)  |  UNIQUE, NOT NULL              |
+| created_at |  TIMESTAMP    |   DEFAULT CURRENT_TIMESTAMP    |
+
+### Posts Table
+|   Column   |     Type      |         Constraints                    |
+|------------|---------------|----------------------------------------|
+|   post_id  |     INT       |   PRIMARY KEY, AUTO_INCREMENT          |
+|   user_id  |     INT       | NOT NULL, FOREIGN KEY (users.user_id)  |
+|   title    |  VARCHAR(255) |   NOT NULL                             |
+|   content  |  TEXT         |       NOT NULL                         |
+| created_at |   TIMESTAMP   |      DEFAULT CURRENT_TIMESTAMP         |
 
 ## How It Works
 
