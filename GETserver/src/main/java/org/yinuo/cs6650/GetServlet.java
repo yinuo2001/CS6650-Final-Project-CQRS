@@ -63,13 +63,10 @@ public class GetServlet extends HttpServlet {
       String[] pathParts = url.split("/");
       if (pathParts.length == 3) {
         String postId = pathParts[2];
-        // URL format: /posts/{postId}
+        // URL format: [IP_ADDR]:[PORT]/[WAR_NAME]/posts/{postId}
         getPostById(postId, response);
-      } else if (pathParts.length == 2) {
-        // URL format: /posts
-        getAllPosts(response);
       } else if (pathParts.length == 4 && "user".equals(pathParts[2])) {
-        // URL format: /posts/user/{userId}
+        // URL format: [IP_ADDR]:[PORT]/[WAR_NAME]/posts/user/{userId}
         String userId = pathParts[3];
         getPostsByUserId(userId, response);
       } else {
@@ -79,11 +76,8 @@ public class GetServlet extends HttpServlet {
       String [] pathParts = url.split("/");
       if (pathParts.length == 3) {
         String userId = pathParts[2];
-        // URL format: /users/{userId}
+        // URL format: [IP_ADDR]:[PORT]/[WAR_NAME]/users/{userId}
         getUserById(userId, response);
-      } else if (pathParts.length == 2) {
-        // URL format: /users
-        getAllUsers(response);
       } else {
         handleError(response, HttpServletResponse.SC_BAD_REQUEST, WRONG_URL);
       }
@@ -92,11 +86,8 @@ public class GetServlet extends HttpServlet {
     }
   }
 
+  // Retrieve a post by its ID, first checking Redis cache and then MongoDB
   private void getPostById(String postId, HttpServletResponse response) {
-
-  }
-
-  private void getAllPosts(HttpServletResponse response) {
 
   }
 
@@ -105,10 +96,6 @@ public class GetServlet extends HttpServlet {
   }
 
   private void getUserById(String userId, HttpServletResponse response) {
-
-  }
-
-  private void getAllUsers(HttpServletResponse response) {
 
   }
 
