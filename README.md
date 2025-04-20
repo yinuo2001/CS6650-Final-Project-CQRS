@@ -44,13 +44,15 @@ A simplified but production-style CQRS backend system demonstrating:
 | created_at |  TIMESTAMP    |   DEFAULT CURRENT_TIMESTAMP    |
 
 **Posts Table**
-|   Column   |     Type      |         Constraints                    |
-|------------|---------------|----------------------------------------|
-|   post_id  |     INT       |   PRIMARY KEY, AUTO_INCREMENT          |
-|   user_id  |     INT       | NOT NULL, FOREIGN KEY (users.user_id)  |
-|   title    |  VARCHAR(255) |   NOT NULL                             |
-|   content  |  TEXT         |       NOT NULL                         |
-| created_at |   TIMESTAMP   |      DEFAULT CURRENT_TIMESTAMP         |
+|     Column   |     Type      |         Constraints                    |
+|--------------|---------------|----------------------------------------|
+|   post_id    |     INT       |   PRIMARY KEY, AUTO_INCREMENT          |
+|   user_id    |     INT       | NOT NULL, FOREIGN KEY (users.user_id)  |
+|   title      |  VARCHAR(255) |   NOT NULL                             |
+|   content    |  TEXT         |       NOT NULL                         |
+| like_count   |     INT       |   DEFAULT 0                            |
+| dislike_count|    INT        |   DEFAULT 0                            |
+| created_at   | TIMESTAMP     |      DEFAULT CURRENT_TIMESTAMP         |
 
 ### Database Connection Design
 

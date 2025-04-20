@@ -36,7 +36,7 @@ public class GetServlet extends HttpServlet {
   //TODO: Replace with AWS Read Replica Endpoint
   private static final String REPLICA_ENDPOINT = "mongodb://localhost:27017";
   //TODO: Replace with AWS ElastiCache Endpoint / EC2 instance address holding Redis service
-  private static final String REDIS_ENDPOINT = "redis://localhost:6379";
+  private static final String REDIS_ADDRESS = "localhost";
   private static final String REDIS_PORT_NUM = "6379";
 
   private static final int CACHE_EXPIRY = 3600;
@@ -49,7 +49,7 @@ public class GetServlet extends HttpServlet {
     jedisPoolConfig.setMaxTotal(100);
     jedisPoolConfig.setMaxIdle(20);
     jedisPoolConfig.setMinIdle(5);
-    jedisPool = new JedisPool(jedisPoolConfig, REDIS_ENDPOINT, Integer.parseInt(REDIS_PORT_NUM));
+    jedisPool = new JedisPool(jedisPoolConfig, REDIS_ADDRESS, Integer.parseInt(REDIS_PORT_NUM));
 
     // Initialize MongoDB client
     mongoClient = MongoClients.create(REPLICA_ENDPOINT);
@@ -75,7 +75,7 @@ public class GetServlet extends HttpServlet {
         // URL format: [IP_ADDR]:[PORT]/[WAR_NAME]/posts/{postId}
         getPostById(postId, response);
       } else if (pathParts.length == 4 && "user".equals(pathParts[2])) {
-        // URL format: [IP_ADDR]:[PORT]/[WAR_NAME]/posts/user/{userId}
+        // URL format: [IP_ADDR]:[PORT]/[WAR_NAME]/posts/user/{user_id}
         String userId = pathParts[3];
         getPostsByUserId(userId, response);
       } else {
@@ -85,7 +85,7 @@ public class GetServlet extends HttpServlet {
       String [] pathParts = url.split("/");
       if (pathParts.length == 3) {
         String userId = pathParts[2];
-        // URL format: [IP_ADDR]:[PORT]/[WAR_NAME]/users/{userId}
+        // URL format: [IP_ADDR]:[PORT]/[WAR_NAME]/users/{user_id}
         getUserById(userId, response);
       } else {
         handleError(response, HttpServletResponse.SC_BAD_REQUEST, WRONG_URL);
@@ -157,7 +157,7 @@ public class GetServlet extends HttpServlet {
       }
 
       // Cache miss, fetch from MongoDB and then cache the result
-      Document query = new Document("userId", userId);
+      Document query = new Document("user_id", userId);
       List<Document> posts = findMultipleDocuments("posts", query);
       // Convert to JSON
       String postsJson = convertDocumentsToJson(posts);
@@ -248,7 +248,6 @@ public class GetServlet extends HttpServlet {
       }
     } catch (Exception e) {
       getServletContext().log("Error fetching documents from collection: " + collectionName, e);
-      return null;
     }
     return documents;
   }
@@ -270,7 +269,7 @@ public class GetServlet extends HttpServlet {
 
   private void handleError(HttpServletResponse response, int statusCode, String message)
       throws IOException {
-    response.setStatus(statusCode);
-    response.getWriter().println("<h1>" + message + "</h1>");
+    response.setContentType("application/json");
+    response.getWriter().write("{\"error\": \"" + message + "\"}");
   }
 }
