@@ -12,14 +12,16 @@ import javax.servlet.*;
 import javax.servlet.http.*;
 import javax.servlet.annotation.*;
 import java.io.IOException;
-import redis.clients.jedis.Jedis;
-import redis.clients.jedis.JedisPool;
-import redis.clients.jedis.JedisPoolConfig;
+import redis.clients.jedis.ConnectionPoolConfig;
+import redis.clients.jedis.DefaultJedisClientConfig;
+import redis.clients.jedis.HostAndPort;
+import redis.clients.jedis.JedisClientConfig;
+import redis.clients.jedis.JedisCluster;
 
 // GetServlet fetches posts from Redis cache/MongoDB
 @WebServlet(name = "GetServlet", value = "/*")
 public class GetServlet extends HttpServlet {
-  private JedisPool jedisPool;
+  private JedisCluster jedisCluster;
   private MongoClient mongoClient;
   private MongoDatabase database;
   private Gson gson;
@@ -36,19 +38,24 @@ public class GetServlet extends HttpServlet {
   private static final String POSTS_COLLECTION = "posts";
 
   // Redis configuration
-  private static final String REDIS_ADDRESS = "localhost";
-  private static final String REDIS_PORT_NUM = "6379";
+  private static final String REDIS_HOST = "postcache-fmkdi1.serverless.usw2.cache.amazonaws.com";
+  private static final int REDIS_PORT_NUM = 6379;
   private static final int CACHE_EXPIRY = 3600;
+  private static final int MAX_RETRIES = 5;
 
   @Override
   public void init() throws ServletException {
     super.init();
-    // Initialize Redis connection pool
-    JedisPoolConfig jedisPoolConfig = new JedisPoolConfig();
-    jedisPoolConfig.setMaxTotal(100);
-    jedisPoolConfig.setMaxIdle(20);
-    jedisPoolConfig.setMinIdle(5);
-    jedisPool = new JedisPool(jedisPoolConfig, REDIS_ADDRESS, Integer.parseInt(REDIS_PORT_NUM));
+    // Initialize Elasticache Cluster connection
+    JedisClientConfig clientConfig = DefaultJedisClientConfig.builder()
+        .ssl(true)
+        .build();
+    jedisCluster = new JedisCluster(
+        new HostAndPort(REDIS_HOST, REDIS_PORT_NUM),
+        clientConfig,
+        MAX_RETRIES,
+        new ConnectionPoolConfig()
+    );
 
     // Initialize MongoDB client
     mongoClient = MongoClients.create(MONGO_URI);
@@ -90,8 +97,8 @@ public class GetServlet extends HttpServlet {
   public void destroy() {
     super.destroy();
     // Close Redis connection pool
-    if (jedisPool != null) {
-      jedisPool.close();
+    if (jedisCluster != null) {
+      jedisCluster.close();
     }
     // Close MongoDB client
     if (mongoClient != null) {
@@ -184,8 +191,8 @@ public class GetServlet extends HttpServlet {
 
   // Get data from Redis cache
   private String getFromCache(String cacheKey) {
-    try (Jedis jedis = jedisPool.getResource()) {
-      return jedis.get(cacheKey);
+    try {
+      return jedisCluster.get(cacheKey);
     } catch (Exception e) {
       getServletContext().log("Redis error when fetching key: " + cacheKey, e);
       return null;
@@ -194,8 +201,8 @@ public class GetServlet extends HttpServlet {
 
   // Cache data in Redis cache
   private void cacheData(String cacheKey, String jsonData) {
-    try (Jedis jedis = jedisPool.getResource()) {
-      jedis.setex(cacheKey, CACHE_EXPIRY, jsonData);
+    try {
+      jedisCluster.setex(cacheKey, CACHE_EXPIRY, jsonData);
     } catch (Exception e) {
       getServletContext().log("Redis error when caching key: " + cacheKey, e);
     }
