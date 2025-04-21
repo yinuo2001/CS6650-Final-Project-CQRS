@@ -1,22 +1,23 @@
 package org.yinuo.cs6650;
 
+
+import com.mongodb.client.MongoClient;
+import com.mongodb.client.MongoClients;
+import com.mongodb.client.MongoCollection;
+import com.mongodb.client.MongoDatabase;
+import com.mongodb.client.model.Filters;
+import com.mongodb.client.model.Updates;
+import com.mongodb.client.result.UpdateResult;
+import org.bson.Document;
+import org.bson.conversions.Bson;
+import org.bson.types.ObjectId;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
-import software.amazon.awssdk.regions.Region;
-import java.sql.PreparedStatement;
-import java.sql.SQLException;
 import javax.servlet.*;
 import javax.servlet.http.*;
 import javax.servlet.annotation.*;
 import java.io.IOException;
-import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
-import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
-import software.amazon.awssdk.services.dynamodb.model.DynamoDbException;
-import software.amazon.awssdk.services.dynamodb.model.GetItemRequest;
-import software.amazon.awssdk.services.dynamodb.model.GetItemResponse;
-import software.amazon.awssdk.services.dynamodb.model.PutItemRequest;
-import software.amazon.awssdk.services.dynamodb.model.UpdateItemRequest;
 
 // PostServlet handles post creation
 @WebServlet(name = "PostServlet", value = "/*")
@@ -35,20 +36,21 @@ public class PostServlet extends HttpServlet {
   private static final String LIKE_SUCCESS = "Post liked successfully";
   private static final String DISLIKE_SUCCESS = "Post disliked successfully";
 
-  // DynamoDB table names
-  private static final String USERS_TABLE = "Users";
-  private static final String POSTS_TABLE = "Posts";
+  // MongoDB configuration
+  private static final String MONGO_URI = "mongodb+srv://admin:admin@social-media.i5pvqwf.mongodb.net/?retryWrites=true&w=majority&appName=Social-Media";
+  private static final String DB_NAME = "social_media";
+  private static final String USERS_COLLECTION = "users";
+  private static final String POSTS_COLLECTION = "posts";
 
-  // DynamoDB region
-  private static final Region REGION = Region.US_WEST_2;
-
-  private DynamoDbClient dynamoDbClient;
+  private MongoClient mongoClient;
+  private MongoDatabase database;
 
   @Override
   public void init() throws ServletException {
     super.init();
-    // Initialize JDBC MySQL database connection
-    dynamoDbClient = DynamoDbClient.builder().region(REGION).build();
+    // Initialize MongoDB client
+    mongoClient = MongoClients.create(MONGO_URI);
+    database = mongoClient.getDatabase(DB_NAME);
   }
 
   @Override
@@ -88,10 +90,6 @@ public class PostServlet extends HttpServlet {
       } else {
         handleError(response, HttpServletResponse.SC_BAD_REQUEST, INCOMPLETE_URL);
       }
-    } catch (SQLException e) {
-      // Handle SQL exceptions
-      String errorMessage = "Database error: " + e.getMessage();
-      handleError(response, HttpServletResponse.SC_INTERNAL_SERVER_ERROR, errorMessage);
     } catch (Exception e) {
       // Handle other exceptions
       String errorMessage = "Server error: " + e.getMessage();
@@ -101,7 +99,7 @@ public class PostServlet extends HttpServlet {
 
   // Create a new post
   private void createPost(HttpServletRequest request, HttpServletResponse response)
-      throws IOException, SQLException {
+      throws IOException {
     String title = request.getParameter("title");
     String content = request.getParameter("content");
     String userId = request.getParameter("user_id");
@@ -116,30 +114,28 @@ public class PostServlet extends HttpServlet {
       // Generate a unique UUID for the post ID
       String postId = UUID.randomUUID().toString();
 
-      // Create item for DynamoDB
-      Map<String, AttributeValue> item = new HashMap<>();
-      item.put("postId", AttributeValue.builder().s(postId).build());
-      item.put("userId", AttributeValue.builder().s(userId).build());
-      item.put("title", AttributeValue.builder().s(title).build());
-      item.put("content", AttributeValue.builder().s(content).build());
-      item.put("likeCount", AttributeValue.builder().n("0").build());
-      item.put("dislikeCount", AttributeValue.builder().n("0").build());
-      item.put("createdAt", AttributeValue.builder().s(java.time.Instant.now().toString()).build());
+      // Get posts collection
+      MongoCollection<Document> postsCollection = database.getCollection(POSTS_COLLECTION);
 
-      PutItemRequest putItemRequest = PutItemRequest.builder()
-          .tableName(POSTS_TABLE)
-          .item(item)
-          .build();
+      // Create document for MongoDB
+      Document postDoc = new Document()
+          .append("_id", postId)
+          .append("userId", userId)
+          .append("title", title)
+          .append("content", content)
+          .append("likeCount", 0)
+          .append("dislikeCount", 0)
+          .append("createdAt", java.time.Instant.now().toString());
 
-      // Put item to DynamoDB
-      dynamoDbClient.putItem(putItemRequest);
+      // Insert document into MongoDB
+      postsCollection.insertOne(postDoc);
 
       response.setContentType("application/json");
       response.setStatus(HttpServletResponse.SC_CREATED);
       response.getWriter().write("{\"message\":\"" + CREATE_POST_SUCCESS + "\",\"postId\":\"" + postId + "\"}");
-    } catch (DynamoDbException e) {
-      // Handle DynamoDB exceptions
-      String errorMessage = "DynamoDB error: " + e.getMessage();
+    } catch (Exception e) {
+      // Handle database exceptions
+      String errorMessage = "MongoDB error: " + e.getMessage();
       handleError(response, HttpServletResponse.SC_INTERNAL_SERVER_ERROR, errorMessage);
     }
   }
@@ -156,25 +152,23 @@ public class PostServlet extends HttpServlet {
 
     try {
       String userId = UUID.randomUUID().toString();
-      // Create item for DynamoDB
-      Map<String, AttributeValue> item = new HashMap<>();
-      item.put("userId", AttributeValue.builder().s(userId).build());
-      item.put("username", AttributeValue.builder().s(username).build());
-      item.put("createdAt", AttributeValue.builder().s(java.time.Instant.now().toString()).build());
 
-      // Create request
-      PutItemRequest putItemRequest = PutItemRequest.builder()
-          .tableName(USERS_TABLE)
-          .item(item)
-          .build();
+      // Get users collection
+      MongoCollection<Document> usersCollection = database.getCollection(USERS_COLLECTION);
 
-      // Put item to DynamoDB
-      dynamoDbClient.putItem(putItemRequest);
+      // Create document for MongoDB
+      Document userDoc = new Document()
+          .append("_id", userId)
+          .append("username", username)
+          .append("createdAt", java.time.Instant.now().toString());
+
+      // Insert document into MongoDB
+      usersCollection.insertOne(userDoc);
 
       response.setContentType("application/json");
       response.setStatus(HttpServletResponse.SC_CREATED);
       response.getWriter().write("{\"message\":\"" + CREATE_USER_SUCCESS + "\",\"userId\":\"" + userId + "\"}");
-    } catch (DynamoDbException e) {
+    } catch (Exception e) {
       getServletContext().log("Error creating user: " + e.getMessage());
       handleError(response, HttpServletResponse.SC_INTERNAL_SERVER_ERROR, "Failed to create user: " + e.getMessage());
     }
@@ -187,43 +181,30 @@ public class PostServlet extends HttpServlet {
     }
 
     try {
-      Map<String, AttributeValue> key = new HashMap<>();
-      key.put("postId", AttributeValue.builder().s(postId).build());
-      GetItemRequest getItemRequest = GetItemRequest.builder()
-          .tableName(POSTS_TABLE)
-          .key(key)
-          .attributesToGet("postId")
-          .build();
+      MongoCollection<Document> postsCollection = database.getCollection(POSTS_COLLECTION);
+      Document existingPost = postsCollection.find(Filters.eq("_id", postId)).first();
 
-      GetItemResponse getItemResponse = dynamoDbClient.getItem(getItemRequest);
-
-      if (!getItemResponse.hasItem()) {
+      if (existingPost == null) {
         handleError(response, HttpServletResponse.SC_NOT_FOUND, POST_NOT_FOUND);
         return;
       }
-      // Update the like or dislike count using atomic counter
-      Map<String, AttributeValue> expressionAttributeValues = new HashMap<>();
-      expressionAttributeValues.put(":inc", AttributeValue.builder().n("1").build());
 
-      Map<String, String> expressionAttributeNames = new HashMap<>();
-      String updateAttribute = action.equals("like") ? "likeCount" : "dislikeCount";
-      expressionAttributeNames.put("#count", updateAttribute);
+      // Update like or dislike count
+      String updateField = action.equals("like") ? "likeCount" : "dislikeCount";
+      Bson filter = Filters.eq("_id", postId);
+      Bson update = Updates.inc(updateField, 1);
 
-      UpdateItemRequest updateItemRequest = UpdateItemRequest.builder()
-          .tableName(POSTS_TABLE)
-          .key(key)
-          .updateExpression("ADD #count :inc")
-          .expressionAttributeNames(expressionAttributeNames)
-          .expressionAttributeValues(expressionAttributeValues)
-          .build();
+      UpdateResult result = postsCollection.updateOne(filter, update);
 
-      dynamoDbClient.updateItem(updateItemRequest);
-
-      String successMessage = action.equals("like") ? LIKE_SUCCESS : DISLIKE_SUCCESS;
-      response.setContentType("application/json");
-      response.setStatus(HttpServletResponse.SC_OK);
-      response.getWriter().write("{\"message\":\"" + successMessage + "\"}");
-    } catch (DynamoDbException e) {
+      if (result.getModifiedCount() > 0) {
+        String successMessage = action.equals("like") ? LIKE_SUCCESS : DISLIKE_SUCCESS;
+        response.setContentType("application/json");
+        response.setStatus(HttpServletResponse.SC_OK);
+        response.getWriter().write("{\"message\":\"" + successMessage + "\"}");
+      } else {
+        handleError(response, HttpServletResponse.SC_INTERNAL_SERVER_ERROR, "Failed to update post");
+      }
+    } catch (Exception e) {
       getServletContext().log("Error fetching post with ID: " + postId, e);
       handleError(response, HttpServletResponse.SC_INTERNAL_SERVER_ERROR, "Failed to fetch post: " + e.getMessage());
     }
@@ -234,5 +215,14 @@ public class PostServlet extends HttpServlet {
     response.setStatus(statusCode);
     response.setContentType("application/json");
     response.getWriter().write("{\"error\":\"" + errorMessage + "\"}");
+  }
+
+  @Override
+  public void destroy() {
+    // Close the mongoDB client
+    if (mongoClient != null) {
+      mongoClient.close();
+    }
+    super.destroy();
   }
 }

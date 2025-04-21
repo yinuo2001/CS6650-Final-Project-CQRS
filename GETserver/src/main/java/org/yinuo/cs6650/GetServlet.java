@@ -1,12 +1,13 @@
 package org.yinuo.cs6650;
 
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import software.amazon.awssdk.regions.Region;
-
 import com.google.gson.Gson;
+import com.mongodb.client.MongoClient;
+import com.mongodb.client.MongoClients;
+import com.mongodb.client.MongoCollection;
+import com.mongodb.client.MongoDatabase;
+import com.mongodb.client.model.Filters;
+import org.bson.Document;
+
 import javax.servlet.*;
 import javax.servlet.http.*;
 import javax.servlet.annotation.*;
@@ -14,17 +15,13 @@ import java.io.IOException;
 import redis.clients.jedis.Jedis;
 import redis.clients.jedis.JedisPool;
 import redis.clients.jedis.JedisPoolConfig;
-import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
-import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
-import software.amazon.awssdk.services.dynamodb.model.DynamoDbException;
-import software.amazon.awssdk.services.dynamodb.model.GetItemRequest;
-import software.amazon.awssdk.services.dynamodb.model.GetItemResponse;
 
-// GetServlet fetches posts from Redis cache/DynamoDB
+// GetServlet fetches posts from Redis cache/MongoDB
 @WebServlet(name = "GetServlet", value = "/*")
 public class GetServlet extends HttpServlet {
   private JedisPool jedisPool;
-  private DynamoDbClient dynamoDbClient;
+  private MongoClient mongoClient;
+  private MongoDatabase database;
   private Gson gson;
 
   // Error messages
@@ -33,14 +30,14 @@ public class GetServlet extends HttpServlet {
   private static final String SERVER_ERROR = "Internal server error";
   private static final String POST_NOT_FOUND = "Post not found";
 
-  // Table name
-  private static final String POSTS_TABLE = "Posts";
-  //TODO: Replace with actual region of Read Replica
-  private static final Region REGION = Region.US_WEST_2;
-  //TODO: Replace with AWS ElastiCache Endpoint / EC2 instance address holding Redis service
+  // MongoDB configuration
+  private static final String MONGO_URI = "mongodb+srv://admin:admin@social-media.i5pvqwf.mongodb.net/?retryWrites=true&w=majority&appName=Social-Media";
+  private static final String DB_NAME = "social_media";
+  private static final String POSTS_COLLECTION = "posts";
+
+  // Redis configuration
   private static final String REDIS_ADDRESS = "localhost";
   private static final String REDIS_PORT_NUM = "6379";
-
   private static final int CACHE_EXPIRY = 3600;
 
   @Override
@@ -53,8 +50,9 @@ public class GetServlet extends HttpServlet {
     jedisPoolConfig.setMinIdle(5);
     jedisPool = new JedisPool(jedisPoolConfig, REDIS_ADDRESS, Integer.parseInt(REDIS_PORT_NUM));
 
-    // Initialize DynamoDB client
-    dynamoDbClient = DynamoDbClient.builder().region(REGION).build();
+    // Initialize MongoDB client
+    mongoClient = MongoClients.create(MONGO_URI);
+    database = mongoClient.getDatabase(DB_NAME);
 
     // Initialize Gson
     gson = new Gson();
@@ -62,7 +60,7 @@ public class GetServlet extends HttpServlet {
 
   @Override
   protected void doGet(HttpServletRequest request, HttpServletResponse response)
-      throws ServletException, IOException {
+      throws IOException {
     String url = request.getPathInfo();
     if (url == null || url.isEmpty()) {
       handleError(response, HttpServletResponse.SC_BAD_REQUEST, EMPTY_URL);
@@ -96,12 +94,12 @@ public class GetServlet extends HttpServlet {
       jedisPool.close();
     }
     // Close MongoDB client
-    if (dynamoDbClient != null) {
-      dynamoDbClient.close();
+    if (mongoClient != null) {
+      mongoClient.close();
     }
   }
 
-  // Retrieve a post by its ID, first checking Redis cache and then DynamoDB
+  // Retrieve a post by its ID, first checking Redis cache and then MongoDB
   private void getPostById(String postId, HttpServletResponse response) throws IOException {
     try {
       response.setContentType("application/json");
@@ -115,28 +113,18 @@ public class GetServlet extends HttpServlet {
         return;
       }
 
-      // Cache miss, fetch from DynamoDB
-      Map<String, AttributeValue> key = new HashMap<>();
-      key.put("postId", AttributeValue.builder().s(postId).build());
+      // Cache miss, fetch from MongoDB
+      MongoCollection<Document> postsCollection = database.getCollection(POSTS_COLLECTION);
+      Document post = postsCollection.find(Filters.eq("_id", postId)).first();
 
-      GetItemRequest getItemRequest = GetItemRequest.builder()
-          .tableName(POSTS_TABLE)
-          .key(key)
-          .attributesToGet("postId", "title", "content") // Only get title and content (plus ID)
-          .consistentRead(false)
-          .build();
-      GetItemResponse getItemResponse = dynamoDbClient.getItem(getItemRequest);
-      if (getItemResponse.hasItem()) {
-        // Convert DynamoDB item to JSON, but only include specific fields
-        Map<String, Object> postMap = new HashMap<>();
-        Map<String, AttributeValue> item = getItemResponse.item();
+      if (post != null) {
+        // Create a new document with only the fields we want
+        Document filteredPost = new Document();
+        filteredPost.put("postId", post.getString("_id"));
+        filteredPost.put("title", post.getString("title"));
+        filteredPost.put("content", post.getString("content"));
 
-        // Include only postId, title, and content
-        postMap.put("postId", item.get("postId").s());
-        postMap.put("title", item.get("title").s());
-        postMap.put("content", item.get("content").s());
-
-        String postJson = gson.toJson(postMap);
+        String postJson = gson.toJson(filteredPost);
 
         // Cache the result
         cacheData(cacheKey, postJson);
@@ -145,7 +133,7 @@ public class GetServlet extends HttpServlet {
       } else {
         handleError(response, HttpServletResponse.SC_NOT_FOUND, POST_NOT_FOUND);
       }
-    } catch (DynamoDbException e) {
+    } catch (Exception e) {
       getServletContext().log("Error fetching post with ID: " + postId, e);
       handleError(response, HttpServletResponse.SC_INTERNAL_SERVER_ERROR, SERVER_ERROR);
     }
@@ -163,51 +151,39 @@ public class GetServlet extends HttpServlet {
         return;
       }
 
-      // Cache miss, fetch from DynamoDB
-      Map<String, AttributeValue> key = new HashMap<>();
-      key.put("postId", AttributeValue.builder().s(postId).build());
-      GetItemRequest getItemRequest = GetItemRequest.builder()
-          .tableName(POSTS_TABLE)
-          .key(key)
-          .consistentRead(false)
-          .attributesToGet("postId", "likeCount", "dislikeCount")
-          .build();
-      GetItemResponse getItemResponse = dynamoDbClient.getItem(getItemRequest);
+      // Cache miss, fetch from MongoDB
+      MongoCollection<Document> postsCollection = database.getCollection(POSTS_COLLECTION);
+      Document post = postsCollection.find(Filters.eq("_id", postId)).first();
 
-      if (getItemResponse.hasItem()) {
-        Map<String, AttributeValue> item = getItemResponse.item();
-        Map<String, Object> likeDislikeMap = new HashMap<>();
-        likeDislikeMap.put("postId", item.get("postId").s());
+      if (post != null) {
+        Document likesInfo = new Document();
+        likesInfo.put("postId", post.getString("_id"));
 
-        int likeCount = 0;
-        if (item.containsKey("likeCount") && item.get("likeCount").n() != null) {
-          likeCount = Integer.parseInt(item.get("likeCount").n());
-        }
-        likeDislikeMap.put("likeCount", likeCount);
+        // Get like count, default to 0 if not present
+        Integer likeCount = post.getInteger("likeCount", 0);
+        likesInfo.put("likeCount", likeCount);
 
-        int dislikeCount = 0;
-        if (item.containsKey("dislikeCount") && item.get("dislikeCount").n() != null) {
-          dislikeCount = Integer.parseInt(item.get("dislikeCount").n());
-        }
-        likeDislikeMap.put("dislikeCount", dislikeCount);
+        // Get dislike count, default to 0 if not present
+        Integer dislikeCount = post.getInteger("dislikeCount", 0);
+        likesInfo.put("dislikeCount", dislikeCount);
 
-        // Convert to JSON
-        String countsJson = gson.toJson(likeDislikeMap);
+        String likesJson = gson.toJson(likesInfo);
+
         // Cache the result
-        cacheData(cacheKey, countsJson);
-
-        response.getWriter().write(countsJson);
+        cacheData(cacheKey, likesJson);
+        // Return the likes info
+        response.getWriter().write(likesJson);
       } else {
         handleError(response, HttpServletResponse.SC_NOT_FOUND, POST_NOT_FOUND);
       }
-    } catch (DynamoDbException e) {
+    } catch (Exception e) {
       getServletContext().log("Error fetching likes count for post: " + postId, e);
       handleError(response, HttpServletResponse.SC_INTERNAL_SERVER_ERROR, SERVER_ERROR);
     }
   }
 
   // Get data from Redis cache
-  private String getFromCache (String cacheKey) {
+  private String getFromCache(String cacheKey) {
     try (Jedis jedis = jedisPool.getResource()) {
       return jedis.get(cacheKey);
     } catch (Exception e) {
@@ -217,7 +193,7 @@ public class GetServlet extends HttpServlet {
   }
 
   // Cache data in Redis cache
-  private void cacheData (String cacheKey, String jsonData) {
+  private void cacheData(String cacheKey, String jsonData) {
     try (Jedis jedis = jedisPool.getResource()) {
       jedis.setex(cacheKey, CACHE_EXPIRY, jsonData);
     } catch (Exception e) {
@@ -229,6 +205,6 @@ public class GetServlet extends HttpServlet {
       throws IOException {
     response.setContentType("application/json");
     response.setStatus(statusCode);
-    response.getWriter().write("{\"error\": \"" + message + "\"}");
+    response.getWriter().write("{\"error\":\"" + message + "\"}");
   }
 }
