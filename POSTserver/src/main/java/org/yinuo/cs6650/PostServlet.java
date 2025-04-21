@@ -1,11 +1,23 @@
 package org.yinuo.cs6650;
 
+import java.util.HashMap;
+import java.util.Map;
+import java.util.UUID;
+import software.amazon.awssdk.regions.Region;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import javax.servlet.*;
 import javax.servlet.http.*;
 import javax.servlet.annotation.*;
 import java.io.IOException;
+import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
+import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
+import software.amazon.awssdk.services.dynamodb.model.DynamoDbException;
+import software.amazon.awssdk.services.dynamodb.model.GetItemRequest;
+import software.amazon.awssdk.services.dynamodb.model.GetItemResponse;
+import software.amazon.awssdk.services.dynamodb.model.PutItemRequest;
+import software.amazon.awssdk.services.dynamodb.model.UpdateItemRequest;
+
 // PostServlet handles post creation
 @WebServlet(name = "PostServlet", value = "/*")
 public class PostServlet extends HttpServlet {
@@ -14,33 +26,29 @@ public class PostServlet extends HttpServlet {
   private static final String MISSING_REQUIRED_PARAMETERS = "Missing required parameters";
   private static final String EMPTY_URL = "Empty URL";
   private static final String INCOMPLETE_URL = "Incomplete URL";
+  private static final String INVALID_ACTION = "Invalid action (must be 'like' or 'dislike')";
+  private static final String POST_NOT_FOUND = "Post not found";
 
   // Message constants
   private static final String CREATE_POST_SUCCESS = "Post created successfully";
   private static final String CREATE_USER_SUCCESS = "User created successfully";
+  private static final String LIKE_SUCCESS = "Post liked successfully";
+  private static final String DISLIKE_SUCCESS = "Post disliked successfully";
 
-  // Database connection constants
-  private static final String DB_DRIVER = "com.mysql.cj.jdbc.Driver";
-  //TODO: Change the database name to RDS db name
-  private static final String DB_NAME = "your_database_name";
-  //TODO: Change the database host to RDS db endpoint
-  private static final String DB_HOST = "localhost";
-  private static final String DB_PORT = "3306";
-  private static final String DB_URL = "jdbc:mysql://" + DB_HOST + ":" + DB_PORT + "/" + DB_NAME;
-  private static final String DB_USER = "admin";
-  private static final String DB_PASSWORD = "adminadmin";
+  // DynamoDB table names
+  private static final String USERS_TABLE = "Users";
+  private static final String POSTS_TABLE = "Posts";
 
-  private java.sql.Connection connection;
+  // DynamoDB region
+  private static final Region REGION = Region.US_WEST_2;
+
+  private DynamoDbClient dynamoDbClient;
 
   @Override
   public void init() throws ServletException {
     super.init();
     // Initialize JDBC MySQL database connection
-    try {
-      Class.forName(DB_DRIVER);
-    } catch (ClassNotFoundException e) {
-      throw new RuntimeException(e);
-    }
+    dynamoDbClient = DynamoDbClient.builder().region(REGION).build();
   }
 
   @Override
@@ -54,23 +62,31 @@ public class PostServlet extends HttpServlet {
         return;
       }
 
-      // Initialize the database connection
-      connection = java.sql.DriverManager.getConnection(DB_URL, DB_USER, DB_PASSWORD);
-
       // Check where the request is routed to
-      switch (url) {
+      if (url.equals("/posts")) {
         // URL: [IP_ADDR]:[PORT]/[WAR_NAME]/posts
-        case "/posts":
-          createPost(request, response);
-          break;
-        case "/users":
-          // URL: [IP_ADDR]:[PORT]/[WAR_NAME]/users
-          createUser(request, response);
-          break;
-        default:
-          // Invalid request
+        createPost(request, response);
+      } else if (url.equals("/users")) {
+        // URL: [IP_ADDR]:[PORT]/[WAR_NAME]/users
+        createUser(request, response);
+      } else if (url.startsWith("/posts/")) {
+        String[] pathParts = url.split("/");
+        if (pathParts.length == 4) {
+          String postId = pathParts[2];
+          String action = pathParts[3];
+
+          if (action.equals("like") || action.equals("dislike")) {
+            // URL: [IP_ADDR]:[PORT]/[WAR_NAME]/posts/{postId}/like
+            // Or: [IP_ADDR]:[PORT]/[WAR_NAME]/posts/{postId}/dislike
+            reactToPost(postId, action, response);
+          } else {
+            handleError(response, HttpServletResponse.SC_BAD_REQUEST, INCOMPLETE_URL);
+          }
+        } else {
           handleError(response, HttpServletResponse.SC_BAD_REQUEST, INCOMPLETE_URL);
-          break;
+        }
+      } else {
+        handleError(response, HttpServletResponse.SC_BAD_REQUEST, INCOMPLETE_URL);
       }
     } catch (SQLException e) {
       // Handle SQL exceptions
@@ -80,15 +96,6 @@ public class PostServlet extends HttpServlet {
       // Handle other exceptions
       String errorMessage = "Server error: " + e.getMessage();
       handleError(response, HttpServletResponse.SC_INTERNAL_SERVER_ERROR, errorMessage);
-    } finally {
-      // Close the database connection
-      try {
-        if (connection != null && !connection.isClosed()) {
-          connection.close();
-        }
-      } catch (SQLException e) {
-        System.err.println("Failed to close connection: " + e.getMessage());
-      }
     }
   }
 
@@ -105,23 +112,41 @@ public class PostServlet extends HttpServlet {
       return;
     }
 
-    PreparedStatement statement = connection.prepareStatement(
-        "INSERT INTO posts (title, content, user_id) VALUES (?, ?, ?)");
+    try {
+      // Generate a unique UUID for the post ID
+      String postId = UUID.randomUUID().toString();
 
-    // Handle SQL exceptions e.g. user_id not found
-    try (statement) {
-      statement.setString(1, title);
-      statement.setString(2, content);
-      statement.setString(3, userId);
-      statement.executeUpdate();
+      // Create item for DynamoDB
+      Map<String, AttributeValue> item = new HashMap<>();
+      item.put("postId", AttributeValue.builder().s(postId).build());
+      item.put("userId", AttributeValue.builder().s(userId).build());
+      item.put("title", AttributeValue.builder().s(title).build());
+      item.put("content", AttributeValue.builder().s(content).build());
+      item.put("likeCount", AttributeValue.builder().n("0").build());
+      item.put("dislikeCount", AttributeValue.builder().n("0").build());
+      item.put("createdAt", AttributeValue.builder().s(java.time.Instant.now().toString()).build());
+
+      PutItemRequest putItemRequest = PutItemRequest.builder()
+          .tableName(POSTS_TABLE)
+          .item(item)
+          .build();
+
+      // Put item to DynamoDB
+      dynamoDbClient.putItem(putItemRequest);
+
+      response.setContentType("application/json");
+      response.setStatus(HttpServletResponse.SC_CREATED);
+      response.getWriter().write("{\"message\":\"" + CREATE_POST_SUCCESS + "\",\"postId\":\"" + postId + "\"}");
+    } catch (DynamoDbException e) {
+      // Handle DynamoDB exceptions
+      String errorMessage = "DynamoDB error: " + e.getMessage();
+      handleError(response, HttpServletResponse.SC_INTERNAL_SERVER_ERROR, errorMessage);
     }
-    response.setStatus(HttpServletResponse.SC_CREATED);
-    response.getWriter().write(CREATE_POST_SUCCESS);
   }
 
   // Create a new user
   private void createUser(HttpServletRequest request, HttpServletResponse response)
-      throws IOException, SQLException {
+      throws IOException {
     String username = request.getParameter("username");
 
     if (username == null || username.isEmpty()) {
@@ -129,19 +154,85 @@ public class PostServlet extends HttpServlet {
       return;
     }
 
-    PreparedStatement statement = connection.prepareStatement("INSERT INTO users (username) VALUES (?)");
-    // Close the statement automatically at the end of the block
-    try (statement) {
-      statement.setString(1, username);
-      statement.executeUpdate();
+    try {
+      String userId = UUID.randomUUID().toString();
+      // Create item for DynamoDB
+      Map<String, AttributeValue> item = new HashMap<>();
+      item.put("userId", AttributeValue.builder().s(userId).build());
+      item.put("username", AttributeValue.builder().s(username).build());
+      item.put("createdAt", AttributeValue.builder().s(java.time.Instant.now().toString()).build());
+
+      // Create request
+      PutItemRequest putItemRequest = PutItemRequest.builder()
+          .tableName(USERS_TABLE)
+          .item(item)
+          .build();
+
+      // Put item to DynamoDB
+      dynamoDbClient.putItem(putItemRequest);
+
+      response.setContentType("application/json");
+      response.setStatus(HttpServletResponse.SC_CREATED);
+      response.getWriter().write("{\"message\":\"" + CREATE_USER_SUCCESS + "\",\"userId\":\"" + userId + "\"}");
+    } catch (DynamoDbException e) {
+      getServletContext().log("Error creating user: " + e.getMessage());
+      handleError(response, HttpServletResponse.SC_INTERNAL_SERVER_ERROR, "Failed to create user: " + e.getMessage());
     }
-    response.setStatus(HttpServletResponse.SC_CREATED);
-    response.getWriter().write(CREATE_USER_SUCCESS);
+  }
+
+  private void reactToPost(String postId, String action, HttpServletResponse response) throws IOException {
+    if (!action.equals("like") && !action.equals("dislike")) {
+      handleError(response, HttpServletResponse.SC_BAD_REQUEST, INVALID_ACTION);
+      return;
+    }
+
+    try {
+      Map<String, AttributeValue> key = new HashMap<>();
+      key.put("postId", AttributeValue.builder().s(postId).build());
+      GetItemRequest getItemRequest = GetItemRequest.builder()
+          .tableName(POSTS_TABLE)
+          .key(key)
+          .attributesToGet("postId")
+          .build();
+
+      GetItemResponse getItemResponse = dynamoDbClient.getItem(getItemRequest);
+
+      if (!getItemResponse.hasItem()) {
+        handleError(response, HttpServletResponse.SC_NOT_FOUND, POST_NOT_FOUND);
+        return;
+      }
+      // Update the like or dislike count using atomic counter
+      Map<String, AttributeValue> expressionAttributeValues = new HashMap<>();
+      expressionAttributeValues.put(":inc", AttributeValue.builder().n("1").build());
+
+      Map<String, String> expressionAttributeNames = new HashMap<>();
+      String updateAttribute = action.equals("like") ? "likeCount" : "dislikeCount";
+      expressionAttributeNames.put("#count", updateAttribute);
+
+      UpdateItemRequest updateItemRequest = UpdateItemRequest.builder()
+          .tableName(POSTS_TABLE)
+          .key(key)
+          .updateExpression("ADD #count :inc")
+          .expressionAttributeNames(expressionAttributeNames)
+          .expressionAttributeValues(expressionAttributeValues)
+          .build();
+
+      dynamoDbClient.updateItem(updateItemRequest);
+
+      String successMessage = action.equals("like") ? LIKE_SUCCESS : DISLIKE_SUCCESS;
+      response.setContentType("application/json");
+      response.setStatus(HttpServletResponse.SC_OK);
+      response.getWriter().write("{\"message\":\"" + successMessage + "\"}");
+    } catch (DynamoDbException e) {
+      getServletContext().log("Error fetching post with ID: " + postId, e);
+      handleError(response, HttpServletResponse.SC_INTERNAL_SERVER_ERROR, "Failed to fetch post: " + e.getMessage());
+    }
   }
 
   // Handle different error cases
   private void handleError(HttpServletResponse response, int statusCode, String errorMessage) throws IOException {
     response.setStatus(statusCode);
-    response.getWriter().write(errorMessage);
+    response.setContentType("application/json");
+    response.getWriter().write("{\"error\":\"" + errorMessage + "\"}");
   }
 }
