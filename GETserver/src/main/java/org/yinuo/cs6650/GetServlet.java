@@ -40,13 +40,13 @@ public class GetServlet extends HttpServlet {
   // Redis configuration
   private static final String REDIS_HOST = "postcache-fmkdi1.serverless.usw2.cache.amazonaws.com";
   private static final int REDIS_PORT_NUM = 6379;
-  private static final int CACHE_EXPIRY = 3600;
-  private static final int MAX_RETRIES = 5;
+  private static final int MAX_RETRIES = 3;
+  private static final int CACHE_EXPIRY = 3600; // 1 hour
 
   @Override
   public void init() throws ServletException {
     super.init();
-    // Initialize Elasticache Cluster connection
+    // Initialize ElastiCache Cluster connection
     JedisClientConfig clientConfig = DefaultJedisClientConfig.builder()
         .ssl(true)
         .build();

@@ -6,6 +6,14 @@ A simplified but production-style CQRS backend system demonstrating:
 - Eventual consistency with **cache updates**
 - Separation of read and write paths (lightweight **CQRS**)
 
+## Getting Started
+
+1. Ensure ElastiCache is running
+2. Ensure MongoDB is running
+3. Change `MONGO_URI` in `GetServlet.java` & `PostServlet.java` to your MongoDB connection string
+4. Change `REDIS_HOST` in `GetServlet.java` to your ElastiCache endpoint
+5. Ensure Tomcat is running on both servers
+
 ## Architecture Overview
 
 ![image](Architecture.png)
@@ -26,15 +34,19 @@ A simplified but production-style CQRS backend system demonstrating:
 ### Write Endpoints(POST)
 - [IP_ADDR]:8080/post_server/posts - Create a new post
 - [IP_ADDR]:8080/post_server/users - Create a new user
+- [IP_ADDR]:8080/post_server/posts/{id}/like - Like a specific post
+- [IP_ADDR]:8080/post_server/posts/{id}/dislike - Dislike a specific post
 
 ### Read Endpoints(GET)
 - [IP_ADDR]:8080/get_server/posts - Retrieve all posts
 - [IP_ADDR]:8080/get_server/posts/{id} - Retrieve a specific post
-- [IP_ADDR]:8080/get_server/users/{id} - Retrieve a specific user
+- [IP_ADDR]:8080/get_server/posts/{id}/like - Retrieve like&dislike count of a specific post
 
 ## Database
 
 ### Database Schema
+
+**Using MongoDB for NoSQL storage**
 
 **Users Table**
 |   Column   |     Type      |         Constraints            |
