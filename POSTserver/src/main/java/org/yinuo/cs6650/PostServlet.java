@@ -1,6 +1,8 @@
 package org.yinuo.cs6650;
 
-
+import com.google.gson.Gson;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonSyntaxException;
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoClients;
 import com.mongodb.client.MongoCollection;
@@ -10,13 +12,20 @@ import com.mongodb.client.model.Updates;
 import com.mongodb.client.result.UpdateResult;
 import org.bson.Document;
 import org.bson.conversions.Bson;
-import java.util.UUID;
+
 import javax.servlet.*;
 import javax.servlet.http.*;
 import javax.servlet.annotation.*;
+import java.io.BufferedReader;
 import java.io.IOException;
+import java.util.UUID;
+import redis.clients.jedis.ConnectionPoolConfig;
+import redis.clients.jedis.DefaultJedisClientConfig;
+import redis.clients.jedis.HostAndPort;
+import redis.clients.jedis.JedisClientConfig;
+import redis.clients.jedis.JedisCluster;
 
-// PostServlet handles post creation
+// PostServlet handles post creation using JSON request bodies
 @WebServlet(name = "PostServlet", value = "/*")
 public class PostServlet extends HttpServlet {
 
@@ -26,12 +35,20 @@ public class PostServlet extends HttpServlet {
   private static final String INCOMPLETE_URL = "Incomplete URL";
   private static final String INVALID_ACTION = "Invalid action (must be 'like' or 'dislike')";
   private static final String POST_NOT_FOUND = "Post not found";
+  private static final String INVALID_JSON = "Invalid JSON format in request body";
 
   // Message constants
   private static final String CREATE_POST_SUCCESS = "Post created successfully";
   private static final String CREATE_USER_SUCCESS = "User created successfully";
   private static final String LIKE_SUCCESS = "Post liked successfully";
   private static final String DISLIKE_SUCCESS = "Post disliked successfully";
+
+  // ElastiCache configuration, we will be partially using write-through caching
+  private static final String REDIS_HOST = "postcache-fmkdi1.serverless.usw2.cache.amazonaws.com";
+  private static final int REDIS_PORT_NUM = 6379;
+  private static final int CACHE_EXPIRY = 3600;
+  private static final int MAX_RETRIES = 3;
+  private JedisCluster jedisCluster;
 
   // MongoDB configuration
   private static final String MONGO_URI = "mongodb+srv://admin:admin@social-media.i5pvqwf.mongodb.net/?retryWrites=true&w=majority&appName=Social-Media";
@@ -41,6 +58,7 @@ public class PostServlet extends HttpServlet {
 
   private MongoClient mongoClient;
   private MongoDatabase database;
+  private Gson gson;
 
   @Override
   public void init() throws ServletException {
@@ -48,6 +66,19 @@ public class PostServlet extends HttpServlet {
     // Initialize MongoDB client
     mongoClient = MongoClients.create(MONGO_URI);
     database = mongoClient.getDatabase(DB_NAME);
+
+    // Initialize Gson for JSON processing
+    gson = new Gson();
+
+    JedisClientConfig clientConfig = DefaultJedisClientConfig.builder()
+        .ssl(true)
+        .build();
+    jedisCluster = new JedisCluster(
+        new HostAndPort(REDIS_HOST, REDIS_PORT_NUM),
+        clientConfig,
+        MAX_RETRIES,
+        new ConnectionPoolConfig()
+    );
   }
 
   @Override
@@ -94,20 +125,50 @@ public class PostServlet extends HttpServlet {
     }
   }
 
-  // Create a new post
-  private void createPost(HttpServletRequest request, HttpServletResponse response)
-      throws IOException {
-    String title = request.getParameter("title");
-    String content = request.getParameter("content");
-    String userId = request.getParameter("user_id");
+  // Read the JSON body from the request
+  private JsonObject readJsonBody(HttpServletRequest request) throws IOException {
+    StringBuilder buffer = new StringBuilder();
+    BufferedReader reader = request.getReader();
+    String line;
+    while ((line = reader.readLine()) != null) {
+      buffer.append(line);
+    }
 
-    // Validate required parameters
-    if (title == null || title.isEmpty() || content == null || content.isEmpty() || userId == null || userId.isEmpty()) {
-      handleError(response, HttpServletResponse.SC_BAD_REQUEST, MISSING_REQUIRED_PARAMETERS);
-      return;
+    String requestBody = buffer.toString();
+    if (requestBody == null || requestBody.isEmpty()) {
+      return null;
     }
 
     try {
+      return gson.fromJson(requestBody, JsonObject.class);
+    } catch (JsonSyntaxException e) {
+      throw new IOException("Invalid JSON format: " + e.getMessage());
+    }
+  }
+
+  // Create a new post using JSON body
+  private void createPost(HttpServletRequest request, HttpServletResponse response)
+      throws IOException {
+    try {
+      JsonObject json = readJsonBody(request);
+
+      if (json == null) {
+        handleError(response, HttpServletResponse.SC_BAD_REQUEST, INVALID_JSON);
+        return;
+      }
+
+      // Extract fields from JSON
+      String title = json.has("title") ? json.get("title").getAsString() : null;
+      String content = json.has("content") ? json.get("content").getAsString() : null;
+      String userId = json.has("userId") ? json.get("userId").getAsString() : null;
+
+      // Validate required parameters
+      if (title == null || title.isEmpty() || content == null || content.isEmpty()
+          || userId == null || userId.isEmpty()) {
+        handleError(response, HttpServletResponse.SC_BAD_REQUEST, MISSING_REQUIRED_PARAMETERS);
+        return;
+      }
+
       // Generate a unique UUID for the post ID
       String postId = UUID.randomUUID().toString();
 
@@ -127,9 +188,16 @@ public class PostServlet extends HttpServlet {
       // Insert document into MongoDB
       postsCollection.insertOne(postDoc);
 
+      // Create response JSON
+      JsonObject responseJson = new JsonObject();
+      responseJson.addProperty("message", CREATE_POST_SUCCESS);
+      responseJson.addProperty("postId", postId);
+
       response.setContentType("application/json");
       response.setStatus(HttpServletResponse.SC_CREATED);
-      response.getWriter().write("{\"message\":\"" + CREATE_POST_SUCCESS + "\",\"postId\":\"" + postId + "\"}");
+      response.getWriter().write(gson.toJson(responseJson));
+    } catch (JsonSyntaxException e) {
+      handleError(response, HttpServletResponse.SC_BAD_REQUEST, INVALID_JSON);
     } catch (Exception e) {
       // Handle database exceptions
       String errorMessage = "MongoDB error: " + e.getMessage();
@@ -137,17 +205,25 @@ public class PostServlet extends HttpServlet {
     }
   }
 
-  // Create a new user
+  // Create a new user using JSON body
   private void createUser(HttpServletRequest request, HttpServletResponse response)
       throws IOException {
-    String username = request.getParameter("username");
-
-    if (username == null || username.isEmpty()) {
-      handleError(response, HttpServletResponse.SC_BAD_REQUEST, MISSING_REQUIRED_PARAMETERS);
-      return;
-    }
-
     try {
+      JsonObject json = readJsonBody(request);
+
+      if (json == null) {
+        handleError(response, HttpServletResponse.SC_BAD_REQUEST, INVALID_JSON);
+        return;
+      }
+
+      // Extract username from JSON
+      String username = json.has("username") ? json.get("username").getAsString() : null;
+
+      if (username == null || username.isEmpty()) {
+        handleError(response, HttpServletResponse.SC_BAD_REQUEST, MISSING_REQUIRED_PARAMETERS);
+        return;
+      }
+
       String userId = UUID.randomUUID().toString();
 
       // Get users collection
@@ -162,9 +238,16 @@ public class PostServlet extends HttpServlet {
       // Insert document into MongoDB
       usersCollection.insertOne(userDoc);
 
+      // Create response JSON
+      JsonObject responseJson = new JsonObject();
+      responseJson.addProperty("message", CREATE_USER_SUCCESS);
+      responseJson.addProperty("userId", userId);
+
       response.setContentType("application/json");
       response.setStatus(HttpServletResponse.SC_CREATED);
-      response.getWriter().write("{\"message\":\"" + CREATE_USER_SUCCESS + "\",\"userId\":\"" + userId + "\"}");
+      response.getWriter().write(gson.toJson(responseJson));
+    } catch (JsonSyntaxException e) {
+      handleError(response, HttpServletResponse.SC_BAD_REQUEST, INVALID_JSON);
     } catch (Exception e) {
       getServletContext().log("Error creating user: " + e.getMessage());
       handleError(response, HttpServletResponse.SC_INTERNAL_SERVER_ERROR, "Failed to create user: " + e.getMessage());
@@ -194,31 +277,71 @@ public class PostServlet extends HttpServlet {
       UpdateResult result = postsCollection.updateOne(filter, update);
 
       if (result.getModifiedCount() > 0) {
+
+        Document updatedPost = postsCollection.find(Filters.eq("_id", postId)).first();
+
+        if (updatedPost != null) {
+          // Update the likes cache
+          updateLikesCache(postId, updatedPost);
+        }
+
         String successMessage = action.equals("like") ? LIKE_SUCCESS : DISLIKE_SUCCESS;
+
+        // Create response JSON
+        JsonObject responseJson = new JsonObject();
+        responseJson.addProperty("message", successMessage);
+
         response.setContentType("application/json");
         response.setStatus(HttpServletResponse.SC_OK);
-        response.getWriter().write("{\"message\":\"" + successMessage + "\"}");
+        response.getWriter().write(gson.toJson(responseJson));
       } else {
         handleError(response, HttpServletResponse.SC_INTERNAL_SERVER_ERROR, "Failed to update post");
       }
     } catch (Exception e) {
-      getServletContext().log("Error fetching post with ID: " + postId, e);
-      handleError(response, HttpServletResponse.SC_INTERNAL_SERVER_ERROR, "Failed to fetch post: " + e.getMessage());
+      getServletContext().log("Error processing reaction to post with ID: " + postId, e);
+      handleError(response, HttpServletResponse.SC_INTERNAL_SERVER_ERROR, "Failed to process reaction: " + e.getMessage());
     }
   }
 
   // Handle different error cases
   private void handleError(HttpServletResponse response, int statusCode, String errorMessage) throws IOException {
+    JsonObject errorJson = new JsonObject();
+    errorJson.addProperty("error", errorMessage);
+
     response.setStatus(statusCode);
     response.setContentType("application/json");
-    response.getWriter().write("{\"error\":\"" + errorMessage + "\"}");
+    response.getWriter().write(gson.toJson(errorJson));
+  }
+
+  // Update the likes cache in Redis
+  // Write-through caching: when a post is liked or disliked, update the cache
+  private void updateLikesCache(String postId, Document post) {
+    try {
+      Document likesInfo = new Document();
+      likesInfo.put("postId", post.getString("_id"));
+      likesInfo.put("likeCount", post.getInteger("likeCount", 0));
+      likesInfo.put("dislikeCount", post.getInteger("dislikeCount", 0));
+
+      String cacheKey = "post:likes:" + postId;
+      String likesJson = gson.toJson(likesInfo);
+
+      // Update the cache with new values
+      jedisCluster.setex(cacheKey, CACHE_EXPIRY, likesJson);
+    } catch (Exception e) {
+      getServletContext().log("Error updating likes cache for post: " + postId, e);
+    }
   }
 
   @Override
   public void destroy() {
-    // Close the mongoDB client
+    // Close the MongoDB client
     if (mongoClient != null) {
       mongoClient.close();
+    }
+
+    // Close the Redis connection pool
+    if (jedisCluster != null) {
+      jedisCluster.close();
     }
     super.destroy();
   }
