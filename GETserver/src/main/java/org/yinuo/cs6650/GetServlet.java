@@ -1,6 +1,9 @@
 package org.yinuo.cs6650;
 
 import com.google.gson.Gson;
+import com.mongodb.ConnectionString;
+import com.mongodb.MongoClientSettings;
+import com.mongodb.ReadPreference;
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoClients;
 import com.mongodb.client.MongoCollection;
@@ -33,7 +36,7 @@ public class GetServlet extends HttpServlet {
   private static final String POST_NOT_FOUND = "Post not found";
 
   // MongoDB configuration
-  private static final String MONGO_URI = "mongodb+srv://admin:admin@social-media.i5pvqwf.mongodb.net/?retryWrites=true&w=majority&appName=Social-Media";
+  private static final String MONGO_URI = "mongodb+srv://admin:admin@social-media.i5pvqwf.mongodb.net/?retryWrites=true&w=majority&readPreference=secondaryPreferred&appName=Social-Media";
   private static final String DB_NAME = "social_media";
   private static final String POSTS_COLLECTION = "posts";
 
@@ -57,8 +60,13 @@ public class GetServlet extends HttpServlet {
         new ConnectionPoolConfig()
     );
 
+    MongoClientSettings settings = MongoClientSettings.builder()
+        .applyConnectionString(new ConnectionString(MONGO_URI))
+        .readPreference(ReadPreference.secondaryPreferred())
+        .build();
+
     // Initialize MongoDB client
-    mongoClient = MongoClients.create(MONGO_URI);
+    mongoClient = MongoClients.create(settings);
     database = mongoClient.getDatabase(DB_NAME);
 
     // Initialize Gson
